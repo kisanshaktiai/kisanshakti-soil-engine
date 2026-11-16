@@ -47,3 +47,35 @@ def test_rejects_wrong_units():
 @pytest.mark.parametrize('url',['http://remote.example','https://user:pass@example.com','https://example.com?key=x'])
 def test_rejects_unsafe_database_url(url):
     with pytest.raises(ValueError): Database(url,'secret')
+
+
+def test_bounded_batch_exits_when_queue_empty(monkeypatch):
+    from soil_ingestion import worker
+    monkeypatch.setenv('SOILGRIDS_SOURCE_VERSION', 'fixture')
+    monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
+    monkeypatch.setenv('SUPABASE_SERVICE_ROLE_KEY', 'fixture')
+    fake = Mock()
+    fake.rpc.return_value = None
+    monkeypatch.setattr(worker, 'Database', lambda url, key: fake)
+    assert worker.run_batch(max_jobs=3, max_seconds=60) == 0
+    fake.rpc.assert_called_once_with('soil_claim', p_source='fixture', p_algorithm=ALGORITHM)
+
+
+def test_bounded_batch_processes_one_and_exits(monkeypatch):
+    from soil_ingestion import worker
+    monkeypatch.setenv('SOILGRIDS_SOURCE_VERSION', 'fixture')
+    monkeypatch.setenv('SUPABASE_URL', 'https://example.supabase.co')
+    monkeypatch.setenv('SUPABASE_SERVICE_ROLE_KEY', 'fixture')
+    fake = Mock()
+    fake.rpc.side_effect = [JOB, None]
+    completed = []
+    monkeypatch.setattr(worker, 'Database', lambda url, key: fake)
+    monkeypatch.setattr(worker, 'process_job', lambda db, job: completed.append(job) or True)
+    assert worker.run_batch(max_jobs=3, max_seconds=60) == 0
+    assert completed == [JOB]
+
+
+def test_bounded_batch_rejects_invalid_limits():
+    from soil_ingestion.worker import run_batch
+    with pytest.raises(ValueError):
+        run_batch(max_jobs=0, max_seconds=60)
