@@ -1,0 +1,20 @@
+services:
+  soil-worker:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?Set the target project URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the server-only key}
+      SOILGRIDS_SOURCE_VERSION: ${SOILGRIDS_SOURCE_VERSION:?Set verified source version}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
