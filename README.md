@@ -123,3 +123,47 @@ The app reads through the owner-checked backend. Database rows remain service-on
 Deploy order: isolated database migration → worker container → lands-api → farmer
 UI. Verify one synthetic parcel in staging before applying production changes.
 The container and code do not provision or access an existing server by themselves.
+
+## No-server deployment: GitHub Actions (recommended)
+
+The `.github/workflows/soil-on-demand.yml` workflow runs short-lived GitHub-hosted
+workers. The database queue remains durable and authoritative. A farmer's request
+is enqueued by the companion `lands-api`, which dispatches the workflow through
+GitHub's authenticated REST API. Scheduled runs every 15 minutes attempt to
+recover requests when API dispatch is unavailable or a runner exits unexpectedly.
+Scheduled invocations are best-effort and may be delayed by GitHub.
+
+**Enable only after both review PRs are merged and the database migration is applied:**
+
+1. In this repository's GitHub **Settings → Environments**, create `soil-worker`.
+   Add environment **secrets** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+   Add environment **variable** `SOILGRIDS_SOURCE_VERSION`. Verify the release
+   identifier against your actual provider, and use the same exact version in
+   the Supabase Edge Function. Do not store real farmer coordinates in GitHub logs.
+2. In the farmer-app's Supabase Edge Function secrets, configure
+   `SOILGRIDS_SOURCE_VERSION` and `SOIL_GITHUB_DISPATCH_TOKEN`. The GitHub token
+   must be fine-grained, restricted to this repo with Actions **write** permission,
+   and protected by the Edge Function; never send it to frontend code.
+3. Apply the companion migration `20261116230500_soil_github_actions_queue.sql`
+   and deploy the updated `lands-api` from the farmer-app branch only after
+   reviewing and testing in staging. It replaces the permanent-worker heartbeat
+   gate without changing the RPC names.
+4. The workflow runs from `main` after merge. For a controlled staging test,
+   click **Actions → On-demand SoilGrids processing → Run workflow** using an
+   isolated Supabase test project. Confirm one queued synthetic parcel job
+   completes, inspect the saved JSON report and ensure an unrelated lab row
+   is not overwritten.
+5. After staging validation, configure production secrets. Avoid manual
+   Run workflow against production until reviewed and explicitly authorized.
+
+Each run processes at most eight jobs, targeting 40 minutes of work and with a
+60-minute GitHub job timeout. A running fetch may exceed the soft 40-minute
+target; interrupted jobs are retried through the database lease. The original
+`docker compose` path remains available as an optional operator alternative,
+but is not required for the GitHub Actions architecture.
+
+**Important operational limits:** Workflow dispatch is best-effort and GitHub
+runner startup is not immediate. Free GitHub-hosted runner usage is subject to
+GitHub's published plan and usage limits. ISRIC WCS availability and quotas are
+also external dependencies. Do not confuse SoilGrids modelled properties with
+laboratory measurements. This workflow is not a real-time HTTP soil-analysis API.
