@@ -4,8 +4,9 @@ Fetch soil predictions for registered-land integration, beginning with official
 ISRIC SoilGrids REST and WCS. Dedicated repository:
 https://github.com/kisanshaktiai/kisanshakti-soil-engine
 
-Status: tested computational core and internal sampling diagnostic service;
-the authenticated farmer fetch/job workflow is incomplete.
+Status: computational core, internal diagnostics and durable fetch worker implemented.
+The companion farmer-app PR supplies the Edge route, database RPCs and report UI.
+Deployment and a staged live end-to-end check are still required.
 No existing app, weather, NDVI, crop scheduling, NASA importers, credentials,
 production migrations, farmer records or old repository history are included.
 
@@ -19,7 +20,7 @@ production migrations, farmer records or old repository history are included.
 - Source/geometry/algorithm cache eligibility and six-calendar-month checks.
 - Read-only diagnostic CLI, repeatable REST/WCS comparison and automated tests.
 - Authenticated internal HTTP sampling-plan endpoint with request/vertex limits.
-No database writer is included.
+- Leased worker, progress heartbeats and atomic report completion through database RPCs.
 
 ## Local use
 ```sh
@@ -51,8 +52,8 @@ python -m uvicorn soil_ingestion.service:app --host 127.0.0.1 --port 8000
   256 KiB per request. Unconfigured services refuse startup.
 
 This endpoint is for trusted internal diagnostics. It is **not** the farmer API:
-the future Edge route must verify the app session, accept only a land ID, check
-ownership/tenant and load the canonical boundary from the database. The browser
+the companion Edge route verifies the app session, accepts only a land ID, checks
+ownership/tenant and loads the canonical boundary from the database. The browser
 must never receive this internal token. Use TLS and a bounded reverse proxy for
 any non-local service; apply gateway rate limits before exposing it to operators.
 
@@ -76,12 +77,11 @@ All sampled point values are linked to source pixels. Area-weighted reports incl
 all intersecting raster pixels; the 20-position cap does not discard raster evidence.
 Quantile spatial averages are not parcel confidence intervals. pH remains depth-specific.
 
-## Remaining application work
-Durable jobs/leased worker; authenticated, owner-checked Edge API; additive storage
-and atomic report upserts; lab-data-preserving read contracts; frontend integration;
-isolated staging deployment and registered-land end-to-end verification.
-No production deployment is configured. Do not describe this core and diagnostic
-service as the completed farmer-facing production system.
+## Release requirements
+Apply the companion migration in an isolated database, start the worker on the
+existing server, deploy the updated lands-api, then release the UI. Confirm a live
+synthetic parcel fetch, saved report and ownership denial before production.
+The code does not deploy itself or provision hosting.
 
 ## Repository setup
 The user-created GitHub repository is public. Only code, synthetic examples and
@@ -93,3 +93,33 @@ review. CI runs tests only and does not deploy or access Supabase.
 Core extracted from local soil prototype commit 7b64c59 (2026-11-15).
 SoilGrids-only provider functions were retained; unrelated NASA and centroid-only
 Supabase importer functions and their tests were removed during extraction.
+
+## Farmer-request worker
+
+`python -m soil_ingestion.worker` runs the durable fetch worker. It opens no public
+port. The existing farmer-app `lands-api?action=soil` endpoint authenticates the
+farmer, loads the registered boundary and enqueues an idempotent job. This worker
+claims a leased job, fetches the full 4–20-position/native-pixel report, reports
+actual layer progress, and atomically commits report evidence and completion.
+
+Apply the companion farmer-app migration `20261116085603_soil_fetch_jobs.sql`
+first. For the existing server, copy `.env.example` to `.env`, populate the target
+project URL, server-only service-role key and operator-verified source version,
+then run `docker compose up -d --build`. Never put this key in the farmer app.
+Use a dedicated server account and keep `.env` readable only by that account.
+
+Readiness is a database heartbeat every 20 seconds; the app refuses new work when
+no worker has checked in within two minutes. A lost worker's job can be reclaimed
+after its ten-minute lease expires, up to three attempts. A stale worker cannot
+finish another worker's lease. SIGTERM stops claiming new work; interrupted jobs
+recover through the lease. Do not run more workers than the provider quota permits.
+
+Full depth, source, units, sample and native-pixel evidence is saved in
+`soil_parcel_reports`. Only a complete 0–5 cm compatibility summary is projected
+into `soil_health`, and only if there is no manual or laboratory row for that land.
+Total nitrogen stays in the full report in g/kg; available N/P/K are not invented.
+The app reads through the owner-checked backend. Database rows remain service-only.
+
+Deploy order: isolated database migration → worker container → lands-api → farmer
+UI. Verify one synthetic parcel in staging before applying production changes.
+The container and code do not provision or access an existing server by themselves.
