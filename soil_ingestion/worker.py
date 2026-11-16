@@ -119,5 +119,42 @@ def run():
     thread.join(timeout=2)
 
 
+
+
+
+def run_batch(max_jobs=8, max_seconds=2400):
+    """Process existing durable jobs and exit; for short-lived GitHub Actions runners.
+
+    No worker heartbeat is required: enqueue is independent from runtime readiness.
+    Each job retains the existing database-backed lease, progress and atomic commit.
+    """
+    import time
+    if not 1 <= max_jobs <= 100 or not 60 <= max_seconds <= 18000:
+        raise ValueError("Invalid worker batch limits")
+    source = os.environ.get('SOILGRIDS_SOURCE_VERSION', '').strip()
+    if not source:
+        raise ValueError('Set the operator-verified SOILGRIDS_SOURCE_VERSION')
+    db = Database(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_ROLE_KEY'])
+    deadline = time.monotonic() + max_seconds
+    count, failed = 0, 0
+    while count < max_jobs and time.monotonic() < deadline:
+        job = db.rpc('soil_claim', p_source=source, p_algorithm=ALGORITHM)
+        if not job:
+            break
+        count += 1
+        if not process_job(db, job):
+            failed += 1
+    LOG.info('Soil batch finished: jobs=%d failed=%d', count, failed)
+    return 1 if failed else 0
+
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='KisanShakti durable soil queue worker')
+    parser.add_argument('--batch', action='store_true', help='Claim queued jobs and exit, without a heartbeat')
+    parser.add_argument('--max-jobs', type=int, default=8)
+    parser.add_argument('--max-seconds', type=int, default=2400)
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
+    if args.batch:
+        raise SystemExit(run_batch(args.max_jobs, args.max_seconds))
     run()
