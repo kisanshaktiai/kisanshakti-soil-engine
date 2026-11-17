@@ -156,7 +156,8 @@ Scheduled invocations are best-effort and may be delayed by GitHub.
 5. After staging validation, configure production secrets. Avoid manual
    Run workflow against production until reviewed and explicitly authorized.
 
-Each run processes at most eight jobs, targeting 40 minutes of work and with a
+Each run processes at most eight jobs (a manual **Run workflow** may set `max_jobs`
+up to 100 for a one-time backfill), targeting 40 minutes of work and with a
 60-minute GitHub job timeout. A running fetch may exceed the soft 40-minute
 target; interrupted jobs are retried through the database lease. The original
 `docker compose` path remains available as an optional operator alternative,
@@ -167,3 +168,9 @@ runner startup is not immediate. Free GitHub-hosted runner usage is subject to
 GitHub's published plan and usage limits. ISRIC WCS availability and quotas are
 also external dependencies. Do not confuse SoilGrids modelled properties with
 laboratory measurements. This workflow is not a real-time HTTP soil-analysis API.
+
+**Dispatch is the primary trigger.** GitHub delays scheduled runs under load and
+disables scheduled workflows in public repositories after 60 days without repository
+activity, so the 15-minute schedule is only a backup. Keep `SOIL_GITHUB_DISPATCH_TOKEN`
+configured and renewed before expiry; `lands-api` also re-dispatches a job that has
+waited more than two minutes, or whose lease expired, while the farmer's page is open.

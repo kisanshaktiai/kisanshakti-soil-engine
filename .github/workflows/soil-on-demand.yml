@@ -2,6 +2,11 @@ name: On-demand SoilGrids processing
 
 on:
   workflow_dispatch:
+    inputs:
+      max_jobs:
+        description: 'Queued jobs to process in this run (1-100). Raise only for a one-time backfill.'
+        required: false
+        default: '8'
   schedule:
     - cron: '7,22,37,52 * * * *'
 
@@ -21,6 +26,8 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       SOILGRIDS_SOURCE_VERSION: ${{ vars.SOILGRIDS_SOURCE_VERSION }}
+      # Passed through env, never interpolated into the script. Scheduled runs have no inputs.
+      MAX_JOBS: ${{ inputs.max_jobs || '8' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,4 +45,4 @@ jobs:
           test -n "$SUPABASE_SERVICE_ROLE_KEY"
           test -n "$SOILGRIDS_SOURCE_VERSION"
       - name: Process queued soil jobs
-        run: python -m soil_ingestion.worker --batch --max-jobs 8 --max-seconds 2400
+        run: python -m soil_ingestion.worker --batch --max-jobs "$MAX_JOBS" --max-seconds 2400
